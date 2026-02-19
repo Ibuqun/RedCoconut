@@ -83,6 +83,19 @@ function quoteIdentifier(identifier: string, dialect: SqlDialect): string {
   return `"${value.replaceAll('"', '""')}"`
 }
 
+function defaultTimestampExpression(dialect: SqlDialect): string {
+  if (dialect === 'mysql') {
+    return 'NOW()'
+  }
+  if (dialect === 'postgresql') {
+    return 'NOW()'
+  }
+  if (dialect === 'sqlite') {
+    return 'CURRENT_TIMESTAMP'
+  }
+  return 'SYSDATETIME()'
+}
+
 function toSqlLiteral(value: unknown, options: GeneratorOptions): string {
   if (value === null || value === undefined) {
     return 'NULL'
@@ -236,6 +249,11 @@ function App() {
   const [columns, setColumns] = useState<ColumnConfig[]>([])
   const [extraColumns, setExtraColumns] = useState<ExtraColumnConfig[]>([])
   const [options, setOptions] = useState<GeneratorOptions>(defaultOptions)
+  const [timestampExpression, setTimestampExpression] = useState<string>(
+    defaultTimestampExpression(defaultOptions.dialect),
+  )
+  const [includeCreatedAt, setIncludeCreatedAt] = useState<boolean>(true)
+  const [includeUpdatedAt, setIncludeUpdatedAt] = useState<boolean>(true)
 
   const activeRows = useMemo(() => {
     if (!workbook || !selectedSheet) {
@@ -305,6 +323,15 @@ function App() {
     setColumns(inferColumns(activeRows, enabled))
   }
 
+  const handleDialectChange = (dialect: SqlDialect) => {
+    const oldDefault = defaultTimestampExpression(options.dialect)
+    const nextDefault = defaultTimestampExpression(dialect)
+    if (timestampExpression.trim() === '' || timestampExpression === oldDefault) {
+      setTimestampExpression(nextDefault)
+    }
+    setOptions((prev) => ({ ...prev, dialect }))
+  }
+
   const updateColumn = (index: number, patch: Partial<ColumnConfig>) => {
     setColumns((prev) => prev.map((column, idx) => (idx === index ? { ...column, ...patch } : column)))
   }
@@ -328,6 +355,45 @@ function App() {
 
   const removeExtraColumn = (id: string) => {
     setExtraColumns((prev) => prev.filter((column) => column.id !== id))
+  }
+
+  const upsertExtraColumn = (targetName: string, mode: ExtraColumnMode, value: string) => {
+    setExtraColumns((prev) => {
+      const normalized = normalizeIdentifier(targetName).toLowerCase()
+      const existingIndex = prev.findIndex(
+        (column) => normalizeIdentifier(column.targetName).toLowerCase() === normalized,
+      )
+
+      const nextColumn: ExtraColumnConfig = {
+        id: existingIndex >= 0 ? prev[existingIndex].id : crypto.randomUUID(),
+        targetName,
+        include: true,
+        mode,
+        value,
+      }
+
+      if (existingIndex >= 0) {
+        return prev.map((column, index) => (index === existingIndex ? nextColumn : column))
+      }
+      return [...prev, nextColumn]
+    })
+  }
+
+  const applyTimestampDefaults = () => {
+    if (!includeCreatedAt && !includeUpdatedAt) {
+      toast.error('Select at least one timestamp column')
+      return
+    }
+
+    const expression = timestampExpression.trim() || defaultTimestampExpression(options.dialect)
+    if (includeCreatedAt) {
+      upsertExtraColumn('created_at', 'sql', expression)
+    }
+    if (includeUpdatedAt) {
+      upsertExtraColumn('updated_at', 'sql', expression)
+    }
+
+    toast.success('Timestamp defaults applied')
   }
 
   const handleCopy = async () => {
@@ -397,7 +463,7 @@ function App() {
                   <span className="mb-1 block text-[var(--text-secondary)]">SQL Dialect</span>
                   <select
                     value={options.dialect}
-                    onChange={(event) => setOptions((prev) => ({ ...prev, dialect: event.target.value as SqlDialect }))}
+                    onChange={(event) => handleDialectChange(event.target.value as SqlDialect)}
                     className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
                   >
                     {DIALECTS.map((dialect) => (
@@ -502,6 +568,52 @@ function App() {
                     onChange={(event) => setOptions((prev) => ({ ...prev, emptyStringAsNull: event.target.checked }))}
                   />
                   Empty string -&gt; NULL
+                </label>
+              </div>
+            </article>
+
+            <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
+              <h2 className="mb-4 text-lg font-semibold">Timestamp Defaults</h2>
+              <p className="mb-3 text-xs text-[var(--text-tertiary)]">
+                Quickly apply SQL expressions for time columns like created_at and updated_at.
+              </p>
+              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                <label className="text-sm">
+                  <span className="mb-1 block text-[var(--text-secondary)]">Timestamp SQL Expression</span>
+                  <input
+                    value={timestampExpression}
+                    onChange={(event) => setTimestampExpression(event.target.value)}
+                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
+                    placeholder={defaultTimestampExpression(options.dialect)}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={applyTimestampDefaults}
+                  className="rounded-lg border border-[var(--accent)] bg-[var(--accent-dim)] px-4 py-2 text-sm text-[var(--accent)] hover:bg-[var(--accent-glow)]"
+                >
+                  Apply to columns
+                </button>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={includeCreatedAt}
+                    onChange={(event) => setIncludeCreatedAt(event.target.checked)}
+                  />
+                  created_at
+                </label>
+
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={includeUpdatedAt}
+                    onChange={(event) => setIncludeUpdatedAt(event.target.checked)}
+                  />
+                  updated_at
                 </label>
               </div>
             </article>

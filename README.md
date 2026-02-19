@@ -10,6 +10,7 @@ RedCoconut is a local-first web app that converts Excel sheets into configurable
 - Rename/map source columns
 - Add extra table columns not present in file data
 - Set extra column values as text, number, boolean, `NULL`, or raw SQL expressions (for example `NOW()`)
+- Apply timestamp defaults for `created_at` and `updated_at` with configurable SQL expression
 - Copy generated SQL or download `.sql`
 
 ## Local Development
@@ -18,16 +19,3 @@ RedCoconut is a local-first web app that converts Excel sheets into configurable
 npm install
 npm run dev
 ```
-
-## Deploy via GitHub Actions to Vercel
-
-Workflow file: `.github/workflows/vercel-deploy.yml`
-
-Set this repository secret in GitHub:
-
-- `VERCEL_TOKEN`
-
-Behavior:
-
-- Pull requests to `main`: preview deploy
-- Push to `main`: production deploy
