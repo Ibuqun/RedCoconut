@@ -23,11 +23,9 @@ npm run dev
 
 Workflow file: `.github/workflows/vercel-deploy.yml`
 
-Set these repository secrets in GitHub:
+Set this repository secret in GitHub:
 
 - `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
 
 Behavior:
 
