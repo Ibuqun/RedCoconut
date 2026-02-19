@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
@@ -94,6 +94,36 @@ function defaultTimestampExpression(dialect: SqlDialect): string {
     return 'CURRENT_TIMESTAMP'
   }
   return 'SYSDATETIME()'
+}
+
+const timestampHints = [
+  'created',
+  'updated',
+  'modified',
+  'deleted',
+  'timestamp',
+  'datetime',
+  'time',
+  'date',
+  '_at',
+]
+
+function looksLikeTimestampColumn(columnName: string): boolean {
+  const normalized = normalizeIdentifier(columnName).toLowerCase()
+  if (!normalized) {
+    return false
+  }
+
+  return timestampHints.some((hint) => normalized.includes(hint))
+}
+
+function detectTimestampColumns(columns: ColumnConfig[]): string[] {
+  const detected = columns
+    .map((column) => column.targetName || column.sourceName)
+    .filter((name) => name.trim().length > 0)
+    .filter(looksLikeTimestampColumn)
+
+  return [...new Set(detected)]
 }
 
 function toSqlLiteral(value: unknown, options: GeneratorOptions): string {
@@ -253,6 +283,7 @@ function App() {
     defaultTimestampExpression(defaultOptions.dialect),
   )
   const [timestampColumnNames, setTimestampColumnNames] = useState<string>('created_at, updated_at')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeRows = useMemo(() => {
     if (!workbook || !selectedSheet) {
@@ -272,6 +303,13 @@ function App() {
     () => buildInsertScript(dataRows, columns, extraColumns, options),
     [dataRows, columns, extraColumns, options],
   )
+
+  const syncDetectedTimestampColumns = (nextColumns: ColumnConfig[]) => {
+    const detected = detectTimestampColumns(nextColumns)
+    if (detected.length > 0) {
+      setTimestampColumnNames(detected.join(', '))
+    }
+  }
 
   const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -300,7 +338,9 @@ function App() {
       setSelectedSheet(firstSheet)
 
       const firstRows = sheets[firstSheet] ?? []
-      setColumns(inferColumns(firstRows, hasHeaderRow))
+      const inferredColumns = inferColumns(firstRows, hasHeaderRow)
+      setColumns(inferredColumns)
+      syncDetectedTimestampColumns(inferredColumns)
 
       const defaultTableName = normalizeIdentifier(file.name.replace(/\.[^.]+$/, '')) || 'my_table'
       setOptions((prev) => ({ ...prev, tableName: defaultTableName }))
@@ -314,12 +354,16 @@ function App() {
   const handleSheetChange = (sheetName: string) => {
     setSelectedSheet(sheetName)
     const rows = workbook?.sheets[sheetName] ?? []
-    setColumns(inferColumns(rows, hasHeaderRow))
+    const inferredColumns = inferColumns(rows, hasHeaderRow)
+    setColumns(inferredColumns)
+    syncDetectedTimestampColumns(inferredColumns)
   }
 
   const handleHeaderToggle = (enabled: boolean) => {
     setHasHeaderRow(enabled)
-    setColumns(inferColumns(activeRows, enabled))
+    const inferredColumns = inferColumns(activeRows, enabled)
+    setColumns(inferredColumns)
+    syncDetectedTimestampColumns(inferredColumns)
   }
 
   const handleDialectChange = (dialect: SqlDialect) => {
@@ -397,6 +441,44 @@ function App() {
     toast.success('Timestamp defaults applied to ' + columnNames.length + ' column' + (columnNames.length === 1 ? '' : 's'))
   }
 
+  const handleAutoDetectTimestamps = () => {
+    const detected = detectTimestampColumns(columns)
+    if (detected.length === 0) {
+      toast.error('No timestamp-like columns were detected from your mapping')
+      return
+    }
+
+    setTimestampColumnNames(detected.join(', '))
+    toast.success('Detected ' + detected.length + ' timestamp column' + (detected.length === 1 ? '' : 's'))
+  }
+
+  const handleRefreshMappings = () => {
+    if (activeRows.length === 0) {
+      toast.error('Upload a file first')
+      return
+    }
+
+    const refreshed = inferColumns(activeRows, hasHeaderRow)
+    setColumns(refreshed)
+    syncDetectedTimestampColumns(refreshed)
+    toast.success('Mapping refreshed from sheet')
+  }
+
+  const handleClearAll = () => {
+    setWorkbook(null)
+    setSelectedSheet('')
+    setHasHeaderRow(true)
+    setColumns([])
+    setExtraColumns([])
+    setOptions(defaultOptions)
+    setTimestampExpression(defaultTimestampExpression(defaultOptions.dialect))
+    setTimestampColumnNames('created_at, updated_at')
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+    toast.success('Cleared all data and settings')
+  }
+
   const handleCopy = async () => {
     if (!generatedSql) {
       toast.error('No SQL generated yet')
@@ -446,6 +528,7 @@ function App() {
             <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
               <label className="mb-2 block text-sm font-medium">Excel File</label>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleFileUpload}
@@ -455,6 +538,22 @@ function App() {
               {workbook ? (
                 <p className="mt-3 text-sm text-[var(--accent-green)]">Loaded: {workbook.fileName}</p>
               ) : null}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshMappings}
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs hover:bg-[var(--bg-hover)]"
+                >
+                  Refresh mapping
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs hover:bg-[var(--bg-hover)]"
+                >
+                  Clear all
+                </button>
+              </div>
             </article>
 
             <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
@@ -576,9 +675,9 @@ function App() {
             <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
               <h2 className="mb-4 text-lg font-semibold">Timestamp Defaults</h2>
               <p className="mb-3 text-xs text-[var(--text-tertiary)]">
-                Quickly apply SQL expressions for time columns like created_at and updated_at.
+                Quickly apply SQL expressions for time columns and auto-detect likely timestamp names from your mapped columns.
               </p>
-              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
                 <label className="text-sm">
                   <span className="mb-1 block text-[var(--text-secondary)]">Timestamp SQL Expression</span>
                   <input
@@ -588,6 +687,14 @@ function App() {
                     placeholder={defaultTimestampExpression(options.dialect)}
                   />
                 </label>
+
+                <button
+                  type="button"
+                  onClick={handleAutoDetectTimestamps}
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-2 text-sm hover:bg-[var(--bg-hover)]"
+                >
+                  Auto-detect
+                </button>
 
                 <button
                   type="button"
