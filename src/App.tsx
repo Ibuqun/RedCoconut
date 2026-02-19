@@ -252,8 +252,7 @@ function App() {
   const [timestampExpression, setTimestampExpression] = useState<string>(
     defaultTimestampExpression(defaultOptions.dialect),
   )
-  const [includeCreatedAt, setIncludeCreatedAt] = useState<boolean>(true)
-  const [includeUpdatedAt, setIncludeUpdatedAt] = useState<boolean>(true)
+  const [timestampColumnNames, setTimestampColumnNames] = useState<string>('created_at, updated_at')
 
   const activeRows = useMemo(() => {
     if (!workbook || !selectedSheet) {
@@ -380,20 +379,22 @@ function App() {
   }
 
   const applyTimestampDefaults = () => {
-    if (!includeCreatedAt && !includeUpdatedAt) {
-      toast.error('Select at least one timestamp column')
+    const columnNames = timestampColumnNames
+      .split(',')
+      .map((column) => column.trim())
+      .filter(Boolean)
+
+    if (columnNames.length === 0) {
+      toast.error('Add at least one timestamp column name')
       return
     }
 
     const expression = timestampExpression.trim() || defaultTimestampExpression(options.dialect)
-    if (includeCreatedAt) {
-      upsertExtraColumn('created_at', 'sql', expression)
-    }
-    if (includeUpdatedAt) {
-      upsertExtraColumn('updated_at', 'sql', expression)
+    for (const columnName of columnNames) {
+      upsertExtraColumn(columnName, 'sql', expression)
     }
 
-    toast.success('Timestamp defaults applied')
+    toast.success('Timestamp defaults applied to ' + columnNames.length + ' column' + (columnNames.length === 1 ? '' : 's'))
   }
 
   const handleCopy = async () => {
@@ -597,25 +598,15 @@ function App() {
                 </button>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={includeCreatedAt}
-                    onChange={(event) => setIncludeCreatedAt(event.target.checked)}
-                  />
-                  created_at
-                </label>
-
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={includeUpdatedAt}
-                    onChange={(event) => setIncludeUpdatedAt(event.target.checked)}
-                  />
-                  updated_at
-                </label>
-              </div>
+              <label className="mt-3 block text-sm">
+                <span className="mb-1 block text-[var(--text-secondary)]">Timestamp Column Names (comma-separated)</span>
+                <input
+                  value={timestampColumnNames}
+                  onChange={(event) => setTimestampColumnNames(event.target.value)}
+                  className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
+                  placeholder="created_at, updated_at"
+                />
+              </label>
             </article>
 
             <article className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
