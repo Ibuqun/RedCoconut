@@ -196,6 +196,7 @@ function buildInsertScript(
   rows: unknown[][],
   columns: ColumnConfig[],
   extraColumns: ExtraColumnConfig[],
+  timestampOverrides: Record<string, string>,
   options: GeneratorOptions,
 ): string {
   const cleanTable = normalizeIdentifier(options.tableName)
@@ -228,7 +229,14 @@ function buildInsertScript(
   const customColumns = includedExtraColumns.map((column) => quoteIdentifier(column.targetName, options.dialect))
   const columnList = [...mappedColumns, ...customColumns].join(', ')
   const rowValues = filteredRows.map((row) => {
-    const sourceValues = includedColumns.map((column) => toSqlLiteral(row[column.sourceIndex], options))
+    const sourceValues = includedColumns.map((column) => {
+      const normalizedTarget = normalizeIdentifier(column.targetName).toLowerCase()
+      const override = timestampOverrides[normalizedTarget]
+      if (override) {
+        return override
+      }
+      return toSqlLiteral(row[column.sourceIndex], options)
+    })
     const extraValues = includedExtraColumns.map((column) => extraValueToSql(column, options))
     const values = [...sourceValues, ...extraValues]
     return `(${values.join(', ')})`
@@ -283,6 +291,7 @@ function App() {
     defaultTimestampExpression(defaultOptions.dialect),
   )
   const [timestampColumnNames, setTimestampColumnNames] = useState<string>('created_at, updated_at')
+  const [timestampOverrides, setTimestampOverrides] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeRows = useMemo(() => {
@@ -300,8 +309,8 @@ function App() {
   }, [activeRows, hasHeaderRow])
 
   const generatedSql = useMemo(
-    () => buildInsertScript(dataRows, columns, extraColumns, options),
-    [dataRows, columns, extraColumns, options],
+    () => buildInsertScript(dataRows, columns, extraColumns, timestampOverrides, options),
+    [dataRows, columns, extraColumns, timestampOverrides, options],
   )
 
   const syncDetectedTimestampColumns = (nextColumns: ColumnConfig[]) => {
@@ -400,45 +409,60 @@ function App() {
     setExtraColumns((prev) => prev.filter((column) => column.id !== id))
   }
 
-  const upsertExtraColumn = (targetName: string, mode: ExtraColumnMode, value: string) => {
-    setExtraColumns((prev) => {
-      const normalized = normalizeIdentifier(targetName).toLowerCase()
-      const existingIndex = prev.findIndex(
-        (column) => normalizeIdentifier(column.targetName).toLowerCase() === normalized,
-      )
-
-      const nextColumn: ExtraColumnConfig = {
-        id: existingIndex >= 0 ? prev[existingIndex].id : crypto.randomUUID(),
-        targetName,
-        include: true,
-        mode,
-        value,
-      }
-
-      if (existingIndex >= 0) {
-        return prev.map((column, index) => (index === existingIndex ? nextColumn : column))
-      }
-      return [...prev, nextColumn]
-    })
-  }
-
   const applyTimestampDefaults = () => {
-    const columnNames = timestampColumnNames
+    const requested = timestampColumnNames
       .split(',')
       .map((column) => column.trim())
       .filter(Boolean)
 
-    if (columnNames.length === 0) {
+    if (requested.length === 0) {
       toast.error('Add at least one timestamp column name')
       return
     }
 
+    const mappedColumns = columns
+      .filter((column) => column.include && normalizeIdentifier(column.targetName).length > 0)
+      .map((column) => ({
+        normalized: normalizeIdentifier(column.targetName).toLowerCase(),
+        targetName: column.targetName,
+      }))
+
+    const mappedSet = new Set(mappedColumns.map((column) => column.normalized))
     const expression = timestampExpression.trim() || defaultTimestampExpression(options.dialect)
-    for (const columnName of columnNames) {
-      upsertExtraColumn(columnName, 'sql', expression)
+
+    const matched = requested.filter((name) => mappedSet.has(normalizeIdentifier(name).toLowerCase()))
+    const unmatched = requested.filter((name) => !mappedSet.has(normalizeIdentifier(name).toLowerCase()))
+
+    if (matched.length === 0) {
+      toast.error('No matching mapped timestamp columns found. Rename mappings or update names.')
+      return
     }
 
-    toast.success('Timestamp defaults applied to ' + columnNames.length + ' column' + (columnNames.length === 1 ? '' : 's'))
+    setTimestampOverrides((prev) => {
+      const next = { ...prev }
+      for (const columnName of matched) {
+        next[normalizeIdentifier(columnName).toLowerCase()] = expression
+      }
+      return next
+    })
+
+    // Remove stale extra columns with these names so timestamp handling does not append columns.
+    const matchedSet = new Set(matched.map((name) => normalizeIdentifier(name).toLowerCase()))
+    setExtraColumns((prev) => prev.filter((column) => !matchedSet.has(normalizeIdentifier(column.targetName).toLowerCase())))
+
+    if (unmatched.length > 0) {
+      toast.success(
+        'Applied timestamp override to ' +
+        matched.length +
+        ' column' +
+        (matched.length === 1 ? '' : 's') +
+        '. Skipped: ' +
+        unmatched.join(', '),
+      )
+      return
+    }
+
+    toast.success('Applied timestamp override to ' + matched.length + ' column' + (matched.length === 1 ? '' : 's'))
   }
 
   const handleAutoDetectTimestamps = () => {
@@ -473,6 +497,7 @@ function App() {
     setOptions(defaultOptions)
     setTimestampExpression(defaultTimestampExpression(defaultOptions.dialect))
     setTimestampColumnNames('created_at, updated_at')
+    setTimestampOverrides({})
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
