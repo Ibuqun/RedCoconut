@@ -33,6 +33,7 @@ type GeneratorOptions = {
   schemaName: string
   rowsPerInsert: number
   includeColumnList: boolean
+  quoteIdentifiers: boolean
   trimStrings: boolean
   emptyStringAsNull: boolean
   nullTokens: string[]
@@ -51,6 +52,7 @@ const defaultOptions: GeneratorOptions = {
   schemaName: '',
   rowsPerInsert: 250,
   includeColumnList: true,
+  quoteIdentifiers: false,
   trimStrings: true,
   emptyStringAsNull: true,
   nullTokens: ['null', 'nil', 'n/a'],
@@ -68,10 +70,14 @@ function normalizeIdentifier(value: string): string {
   return value.trim().replace(/\s+/g, '_')
 }
 
-function quoteIdentifier(identifier: string, dialect: SqlDialect): string {
+function quoteIdentifier(identifier: string, dialect: SqlDialect, quoteIdentifiers: boolean): string {
   const value = normalizeIdentifier(identifier)
   if (!value) {
     return ''
+  }
+
+  if (!quoteIdentifiers) {
+    return value
   }
 
   if (dialect === 'mysql' || dialect === 'sqlite') {
@@ -222,11 +228,11 @@ function buildInsertScript(
 
   const schema = normalizeIdentifier(options.schemaName)
   const tableRef = schema
-    ? `${quoteIdentifier(schema, options.dialect)}.${quoteIdentifier(cleanTable, options.dialect)}`
-    : quoteIdentifier(cleanTable, options.dialect)
+    ? `${quoteIdentifier(schema, options.dialect, options.quoteIdentifiers)}.${quoteIdentifier(cleanTable, options.dialect, options.quoteIdentifiers)}`
+    : quoteIdentifier(cleanTable, options.dialect, options.quoteIdentifiers)
 
-  const mappedColumns = includedColumns.map((column) => quoteIdentifier(column.targetName, options.dialect))
-  const customColumns = includedExtraColumns.map((column) => quoteIdentifier(column.targetName, options.dialect))
+  const mappedColumns = includedColumns.map((column) => quoteIdentifier(column.targetName, options.dialect, options.quoteIdentifiers))
+  const customColumns = includedExtraColumns.map((column) => quoteIdentifier(column.targetName, options.dialect, options.quoteIdentifiers))
   const columnList = [...mappedColumns, ...customColumns].join(', ')
   const rowValues = filteredRows.map((row) => {
     const sourceValues = includedColumns.map((column) => {
@@ -675,6 +681,15 @@ function App() {
                     onChange={(event) => setOptions((prev) => ({ ...prev, includeColumnList: event.target.checked }))}
                   />
                   Include column list
+                </label>
+
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={options.quoteIdentifiers}
+                    onChange={(event) => setOptions((prev) => ({ ...prev, quoteIdentifiers: event.target.checked }))}
+                  />
+                  Quote identifiers
                 </label>
 
                 <label className="flex items-center gap-2">
