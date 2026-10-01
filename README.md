@@ -19,3 +19,15 @@ RedCoconut is a local-first web app that converts Excel sheets into configurable
 npm install
 npm run dev
 ```
+
+## Cloudflare deployment
+
+The production app is served at `https://tools.ibukuntaiwo.com/RedCoconut/` by a
+Cloudflare Worker with static assets. The Worker normalizes any capitalization of
+`RedCoconut` to the canonical path and passes all unrelated routes through to the
+existing origin.
+
+```bash
+npm run build
+wrangler deploy --minify
+```

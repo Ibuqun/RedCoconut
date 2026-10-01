@@ -1,7 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
+
+let xlsxModulePromise: Promise<typeof import('xlsx')> | undefined
+
+function loadXlsx() {
+  xlsxModulePromise ??= import('xlsx')
+  return xlsxModulePromise
+}
 
 type SqlDialect = 'mysql' | 'postgresql' | 'sqlite' | 'sqlserver'
 
@@ -333,7 +339,7 @@ function App() {
     }
 
     try {
-      const arrayBuffer = await file.arrayBuffer()
+      const [arrayBuffer, XLSX] = await Promise.all([file.arrayBuffer(), loadXlsx()])
       const parsed = XLSX.read(arrayBuffer, { type: 'array', cellDates: true })
 
       const sheets: Record<string, unknown[][]> = {}
@@ -563,6 +569,8 @@ function App() {
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleFileUpload}
+                onFocus={() => void loadXlsx()}
+                onPointerEnter={() => void loadXlsx()}
                 className="block w-full rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 text-sm"
               />
               <p className="mt-2 text-xs text-[var(--text-tertiary)]">Supported: .xlsx, .xls, .csv. Processing is local-only.</p>
